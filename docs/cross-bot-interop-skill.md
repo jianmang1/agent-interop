@@ -1,109 +1,162 @@
----
-name: cross-bot-interop
-description: 涓や釜椋炰功鏈哄櫒浜猴紙宸ヤ綅鐢佃剳 & 绗旇鏈級鍦ㄤ笉鍚屽瓙缃戜笅鐨勪簰閫氭柟妗堝畬鏁磋褰?platforms: [windows]
----
+# 跨机器人互通方案 — 完整实现记录
 
-# 璺ㄦ満鍣ㄤ汉浜掗€氭柟妗?鈥?瀹屾暣瀹炵幇璁板綍
+## 参与者
 
-## 闂鎻忚堪
+| 角色 | 设备 | 网络 | 身份 |
+|------|------|------|------|
+| **工位电脑** | Windows, Hermes Agent 桌面版 | `192.168.1.103` | GitHub: jianmang1 |
+| **笔记本** | Windows, Hermes Agent | `192.168.3.5` | GitHub: jianmang1 |
 
-涓や釜椋炰功鏈哄櫒浜猴紙宸ヤ綅鐢佃剳 = Hermes Agent锛岀瑪璁版湰 = 鍙︿竴涓涔︽櫤鑳戒綋锛夐渶瑕佷簰鐩镐紶閫掓暟鎹紙鎴浘銆佷换鍔¤姹傘€佺粨鏋滅瓑锛夛紝浣嗛潰涓翠互涓嬮檺鍒讹細
+## 问题描述
 
-| 闄愬埗 | 璇存槑 |
-|------|------|
-| 馃寪 **涓嶅悓瀛愮綉** | 宸ヤ綅鐢佃剳 `192.168.1.x`锛岀瑪璁版湰 `192.168.3.x`锛屾棤娉曠洿鎺ョ綉缁滈€氫俊 |
-| 馃 **椋炰功涓嶈浆鍙戞満鍣ㄤ汉@娑堟伅** | 椋炰功骞冲彴涓嶄細鎶婃満鍣ㄤ汉A @鏈哄櫒浜築 鐨勪簨浠舵帹閫佺粰鏈哄櫒浜築 |
-| 馃攲 **鏃犲叕缃慖P** | 涓ゅ彴鏈哄櫒閮藉湪鍐呯綉锛屾棤娉曠洿鎺ユ毚闇叉湇鍔?|
+两台计算机在不同子网（`192.168.1.x` vs `192.168.3.x`），无法直接 TCP 通信，需要跨设备传输文件（截图、任务请求、结果等）。
 
-## 鎺㈢储杩囩殑鏂规
+## 探索过的方案
 
-### 鉂?鏂规1锛氶涔?API 杞锛堟湭瀹屽叏鎵撻€氾級
-- 闇€瑕侀涔﹀簲鐢ㄦ潈闄?`im:message.group_msg`
-- 鏉冮檺闇€瑕佸湪椋炰功寮€鍙戣€呭悗鍙版坊鍔犮€佸彂甯冩柊鐗堟湰銆佺鐞嗗憳瀹℃壒
-- 鏈€缁堟病鏈夎蛋閫氳繖鏉¤矾寰?
-### 鉂?鏂规2锛歐ebhook 鐩磋繛锛堜笉鍚屽瓙缃戜笉閫氾級
-- 宸ヤ綅鐢佃剳閰嶇疆浜?Hermes Webhook锛堢鍙?8644锛?- 绗旇鏈篃閰嶇疆浜?Webhook锛堢鍙?8644锛?- 浣嗙敱浜?`192.168.1.x` 鍜?`192.168.3.x` 鍦ㄤ笉鍚屽瓙缃戯紝TCP 杩炴帴瓒呮椂
-- Webhook 閰嶇疆璁板綍锛?  - 宸ヤ綅鐢佃剳: `http://192.168.1.103:8644/webhooks/notebook-bridge`
-  - 瀵嗛挜: `RJiOxwixczhO1WMCAjPneghPeueFZ-CeEWg5Iq9s6Ak`
-  - 绛惧悕鏂瑰紡: HMAC-SHA256 V2锛坄X-Webhook-Signature-V2` + `X-Webhook-Timestamp`锛?
-### 鉁?鏂规3锛欸itHub 浠撳簱闃熷垪锛堟渶缁堥噰鐢級
-- 鍒╃敤涓ゅ彴鏈哄櫒閮借兘璁块棶浜掕仈缃?- 浣跨敤 GitHub 浠撳簱浣滀负娑堟伅闃熷垪
+### ❌ 方案1：飞书 API 轮询
+- 需要飞书应用权限 `im:message.group_msg`
+- 权限需要在飞书开发者后台添加、发布新版本、管理员审批
+- 最终未走通此路线
 
-## 鏈€缁堟柟妗堬細GitHub 浠撳簱闃熷垪
+### ❌ 方案2：Webhook 直连（不同子网不通）
+- 工位电脑配置 Hermes Webhook（端口 8644）
+- 笔记本也配置 Webhook（端口 8644）
+- 但 `192.168.1.x` 和 `192.168.3.x` 在不同子网，TCP 连接超时
+- 工位电脑 Webhook: `http://192.168.1.103:8644/webhooks/notebook-bridge`
+- 签名方式: HMAC-SHA256 V2（`X-Webhook-Signature-V2` + `X-Webhook-Timestamp`）
 
-### 浠撳簱缁撴瀯
+### ❌ 方案3：飞书群聊 @对方
+- 同一个飞书群，一方发消息另一方通过飞书客户端查看
+- 问题：飞书不将机器人之间的 @消息转发给目标机器人
+- 单向手动下载可用，但无法实现自动化互通
+
+### ✅ 方案4：GitHub 仓库队列（最终方案）
+- 利用两台机器都能访问互联网
+- 使用 GitHub 仓库作为异步消息队列
+
+## 最终方案：GitHub 仓库队列
+
+### 仓库信息
+
+- **URL**: https://github.com/jianmang1/agent-interop
+- **笔记本本地**: `D:\agent互通\`
+- **工位电脑本地**: `E:\agent互通\`
+
+### 目录结构
 
 ```
-jianmang1/agent-interop/
-鈹溾攢鈹€ requests/          # 绗旇鏈?鈫?宸ヤ綅鐢佃剳 鐨勮姹傞槦鍒?鈹?  鈹溾攢鈹€ README.md
-鈹?  鈹斺攢鈹€ request-{timestamp}-{rand}.json
-鈹溾攢鈹€ results/           # 宸ヤ綅鐢佃剳 鈫?绗旇鏈?鐨勭粨鏋滈槦鍒?鈹?  鈹溾攢鈹€ README.md
-鈹?  鈹斺攢鈹€ result-{timestamp}-{rand}.json
-鈹斺攢鈹€ site_r/            # GEE Python 閬ユ劅鐗╁€欏垎鏋愪唬鐮?    鈹斺攢鈹€ ...
+agent-interop/
+├── requests/                          # 请求队列
+│   ├── README.md
+│   ├── request-{ts}-{rand}.json       # 请求文件
+│   └── processed_request-*            # 已处理请求
+├── results/                           # 结果队列
+│   ├── README.md
+│   ├── result-{ts}-{rand}.json        # 结果文件
+│   └── processed_result-*             # 已处理结果
+├── docs/
+│   └── cross-bot-interop-skill.md     # 工位电脑的 skill 文档
+├── poll-notebook.ps1                  # 笔记本端轮询脚本
+├── site_r/                            # GEE 遥感物候分析代码
+├── 互通实现.md                          # 笔记本侧实现文档
+└── README.md
 ```
 
-### 閫氫俊鍗忚
+### 通信协议
 
-#### 璇锋眰鏍煎紡锛堢瑪璁版湰鈫掑伐浣嶇數鑴戯級
+#### 请求格式（笔记本 → 工位电脑）
 
-鏂囦欢璺緞: `requests/request-{timestamp}-{rand4}.json`
+`requests/request-{timestamp}-{random4}.json`:
 
 ```json
 {
   "type": "screenshot",
-  "msg": "璇锋埅涓€寮犳闈㈡埅鍥?,
+  "msg": "请截一张桌面截图",
   "timestamp": "2026-07-15 11:52:44",
-  "reply_to": "results/result-{timestamp}-{rand4}.json"
+  "reply_to": "results/result-{timestamp}-{random4}.json"
 }
 ```
 
-#### 缁撴灉鏍煎紡锛堝伐浣嶇數鑴戔啋绗旇鏈級
+#### 结果格式（工位电脑 → 笔记本）
 
-鏂囦欢璺緞: `results/result-{timestamp}-{rand4}.json`
+`results/result-{timestamp}-{random4}.json`:
 
 ```json
 {
   "type": "screenshot",
-  "status": "done",
-  "path": "E:\\agent浜掗€歕\screenshot.png",
-  "note": "鎴浘宸蹭繚瀛?,
-  "processed_at": 1784087564
+  "status": "completed",
+  "result_file": "desktop_screenshot.png",
+  "timestamp": "2026-07-15 11:52:44",
+  "description": "工位电脑桌面截图"
 }
 ```
 
-### 璁よ瘉鏂瑰紡
-
-- Token 绫诲瀷: GitHub Classic PAT锛坄ghp_` 寮€澶达級
-- 鏉冮檺鑼冨洿: `repo`锛堝畬鏁寸鏈変粨搴撴帶鍒讹級
-- Token 鍊? 瑙?memory 鎴?.env
-
-### 鎿嶄綔娴佺▼
+### 工作流程
 
 ```
-绗旇鏈?                                    宸ヤ綅鐢佃剳
-  鈹?                                         鈹?  鈹溾攢 鍐?requests/request-xxx.json 鈹€鈹€鈹€鈹€鈹€鈹€鈫?   鈹?  鈹?                                         鈹溾攢 杞鍙戠幇鏂拌姹?  鈹?                                         鈹溾攢 鎵ц浠诲姟锛堟埅鍥剧瓑锛?  鈹?                                         鈹溾攢 鍐?results/result-xxx.json
-  鈹?                                         鈹?  鈹溾攢 杞鍙戠幇鏂扮粨鏋?鈫愨攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€    鈹?  鈹?                                         鈹?  鈹斺攢 璇诲彇缁撴灉鏂囦欢锛屽畬鎴愰棴鐜?                 鈹?```
+笔记本                             工位电脑
+  │                                    │
+  ├─ 写 requests/request-xxx.json      │
+  ├─ git add/commit/push ─────────────→│
+  │                                    ├─ 轮询发现新请求
+  │                                    ├─ 执行任务（截图等）
+  │                                    ├─ 写 results/result-xxx.json
+  │                                    ├─ git add/commit/push
+  ├─ 轮询发现新结果 ←─────────────────┤
+  ├─ 读取结果文件                      │
+  ├─ 标记 processed_ ────────────────→│
+  │                                    │
+  ▼                                    ▼
+ 完成闭环                          完成闭环
+```
 
-### 杞鑴氭湰
+### 轮询方式
 
-宸ヤ綅鐢佃剳宸叉湁杞鑴氭湰: `poll-github-queue.ps1`
-- 閫氳繃 GitHub REST API 杞 `requests/` 鐩綍
-- 鏈湴缁存姢 `.processed_tracker.json` 閬垮厤閲嶅澶勭悊
-- 鍙戠幇鏂?`.json` 璇锋眰 鈫?涓嬭浇 鈫?澶勭悊 鈫?鍐欑粨鏋?
-## 鐜閰嶇疆瑕佺偣
+**笔记本端**: `D:\agent互通\poll-notebook.ps1`
+- 监听 `results/` 目录
+- 10 秒轮询间隔
+- 处理后将文件重命名为 `processed_` 前缀
+- 通过 `Start-Process` 后台启动
 
-### 宸ヤ綅鐢佃剳
-- **杩愯鐜**: Windows 10, Hermes Agent (妗岄潰鐗?
-- **椋炰功閰嶇疆**: WebSocket 妯″紡锛宍FEISHU_ALLOW_BOTS=mentions`
-- **Webhook**: 绔彛 8644锛屽凡鍒涘缓 `notebook-bridge` 璺敱锛堝鐢級
-- **Git**: 宸插畨瑁咃紙`git version 2.55.0.windows.1`锛?- **GitHub CLI**: 宸插畨瑁咃紙`gh version 2.96.0`锛?- **Python**: 3.14.6
+**工位电脑端**: `poll-github-queue.ps1`
+- 通过 GitHub REST API 轮询 `requests/` 目录
+- 本地维护 `.processed_tracker.json` 避免重复处理
+- 发现新请求 → 下载 → 处理 → 写结果
 
-### 绗旇鏈?- 闇€閰嶇疆 GitHub PAT 璁块棶鍚屼竴浠撳簱
-- 闇€瀹炵幇杞閫昏緫鎴?webhook 瑙﹀彂
+### 认证方式
 
-## 缁忛獙鏁欒
+- **Token 类型**: GitHub Classic PAT（`ghp_` 开头）
+- **权限范围**: `repo`（完整私有仓库控制）
+- **存放位置**: `~/.hermes/.env` 中 `GITHUB_TOKEN` 变量
+- **教训**: Fine-grained PAT 权限分项细但配置复杂；Classic PAT 勾上 `repo` 一步到位更省事
 
-1. **椋炰功骞冲彴闄愬埗**: 椋炰功涓嶄細灏嗘満鍣ㄤ汉涔嬮棿鐨?@娑堟伅杞彂缁欑洰鏍囨満鍣ㄤ汉銆傝繖鏄钩鍙拌璁★紝涓嶆槸閰嶇疆闂
-2. **Fine-grained PAT vs Classic PAT**: Fine-grained PAT 鏉冮檺鍒嗛」缁嗕絾閰嶇疆澶嶆潅锛汣lassic PAT 鍕句笂 `repo` 涓€姝ュ埌浣嶆洿鐪佷簨
-3. **Webhook HMAC 绛惧悕**: Hermes webhook 浣跨敤 HMAC-SHA256 V2锛岄渶瑕?`X-Webhook-Signature-V2` + `X-Webhook-Timestamp` 澶达紝绛惧悕瀛楃涓叉牸寮忎负 `{timestamp}.{json_body}`
-4. **GitHub API 闄愬埗**: 鐢?API 閫愭枃浠朵笂浼犲ぇ閲忓皬鏂囦欢鏁堢巼浣庯紱鎵归噺鎻愪氦鐢?git tree 鏂瑰紡鏇撮珮鏁?5. **璺ㄥ瓙缃戦€氫俊**: 鏈€绠€鏂规鏄繛鍚屼竴涓?WiFi锛涘鏋滀笉琛屽氨鐢ㄤ簰鑱旂綉鍙闂殑涓粙锛堝 GitHub锛?
+## 经验教训
+
+1. **飞书平台限制**: 飞书不会将机器人之间的 @消息转发给目标机器人。这是平台设计，不是配置问题
+2. **Fine-grained PAT vs Classic PAT**: Fine-grained PAT 权限分项细但配置复杂，Classic PAT 勾上 repo 一步到位
+3. **Webhook HMAC 签名**: Hermes webhook 使用 HMAC-SHA256 V2，需要 `X-Webhook-Signature-V2` + `X-Webhook-Timestamp` 头，签名字符串格式为 `{timestamp}.{json_body}`
+4. **GitHub API 限制**: 用 API 逐文件上传大量小文件效率低；批量提交用 git tree 方式更高效
+5. **跨子网通信**: 最简单方案是连同一个 WiFi；如果不行就用互联网可访问的中介（如 GitHub）
+6. **网络不稳定**: 笔记本的 `git push` HTTPS 偶尔被重置，但 GitHub REST API 可正常使用。API 上传是可靠后备方案
+
+## 测试验证
+
+2026-07-15 成功完成首次端到端测试：
+
+1. ✅ 笔记本 → `requests/` → GitHub → 工位电脑 pull
+2. ✅ 工位电脑截图 → `results/` + 图片 → GitHub → 笔记本 pull
+3. ✅ 笔记本确认 + 标记 `processed_` → GitHub → 工位电脑可见
+
+## Hermes Skill
+
+本协议已保存为 Hermes skill:
+
+| 端 | Skill 名 | 位置 |
+|----|----------|------|
+| 笔记本 | `github-queue-interop` | Hermes skills 目录 |
+| 工位电脑 | `cross-bot-interop` | GitHub 仓库 `docs/` 目录 |
+
+在 Hermes 会话中加载:
+```
+/skill github-queue-interop
+```
