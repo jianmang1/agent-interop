@@ -3,11 +3,15 @@
 
 $repoPath = "D:\agent互通"
 $pollInterval = 10
+$hermesHome = $env:HERMES_HOME
+if (-not $hermesHome) { $hermesHome = 'D:\Hermes Agent CN Desktop\data\hermes-home' }
 $token = $env:GITHUB_TOKEN
 if (-not $token) {
-    $envContent = Get-Content "D:\Hermes Agent CN Desktop\data\hermes-home\.env" -ErrorAction SilentlyContinue
-    foreach ($line in $envContent) {
-        if ($line -match "^GITHUB_TOKEN=(.+)") { $token = $matches[1] }
+    $envFile = Join-Path $hermesHome ".env"
+    if (Test-Path $envFile) {
+        foreach ($line in (Get-Content $envFile -ErrorAction SilentlyContinue)) {
+            if ($line -match "^GITHUB_TOKEN=(.+)") { $token = $matches[1]; break }
+        }
     }
 }
 
