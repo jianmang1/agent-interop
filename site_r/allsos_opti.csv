@@ -1,0 +1,7 @@
+dif,R,RMSE,KGE,name,R_rank,RMSE_rank,all_rank
+,0.723080393,11.4122704,0.132441289,Budburst_filtercubic_SoS_threshold_EVI1,1,1,2
+6.51666667,0.720422889,11.75503427,0.596186504,budfiltercubic_SoS_threshold_EVI9,,,
+8.51666667,0.715222177,12.41159819,0.595837669,budfiltercubic_SoS_threshold_EVI8,,,
+9.51666667,0.694858005,13.50405343,0.595247293,budfiltercubic_SoS_threshold_EVI7,,,
+11.51666667,0.651015965,15.38377356,0.557559334,budfiltercubic_SoS_threshold_EVI6,,,
+13.51666667,0.625662405,17.24905982,0.548247804,budfiltercubic_SoS_threshold_EVI5,,,

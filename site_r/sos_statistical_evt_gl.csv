@@ -1,0 +1,16 @@
+R,RMSE,KGE,name
+0.032020606,80.35993566,-11.79310738,Budburstcubic_SoS_threshold_EVTNDGI
+0.18074081,57.83035485,-3.161537315,Budburstcubic_SoS_threshold_EVTEVI
+0.269556261,94.22560203,-13.32930369,Budburstcubic_SoS_threshold_EVTNDPI
+0.084083026,66.0321081,-6.391466675,Budburstcubic_SoS_threshold_EVTNDVI
+-0.122382663,91.18110495,-13.08247136,Budburstcubic_SoS_threshold_EVTPPI
+-0.005085201,64.75665742,-3.883629548,Budburstfiltercubic_SoS_threshold_EVTNDGI
+0.130759469,40.44140533,-0.751281761,Budburstfiltercubic_SoS_threshold_EVTEVI
+0.134142056,38.62169245,-0.555945333,Budburstfiltercubic_SoS_threshold_EVTNDPI
+0.060553591,50.49045901,-2.263518833,Budburstfiltercubic_SoS_threshold_EVTNDVI
+-0.034943579,60.13190335,-4.929658063,Budburstfiltercubic_SoS_threshold_EVTPPI
+0.010727431,58.89793186,-5.231457104,Budburstmintomax_cubic_SoS_threshold_EVTNDGI
+0.168651274,54.37649099,-2.41954055,Budburstmintomax_cubic_SoS_threshold_EVTEVI
+0.138638718,62.88725222,-5.509116471,Budburstmintomax_cubic_SoS_threshold_EVTNDPI
+0.04766586,57.55801824,-4.253174568,Budburstmintomax_cubic_SoS_threshold_EVTNDVI
+-0.180498711,75.78477076,-8.337641989,Budburstmintomax_cubic_SoS_threshold_EVTPPI
