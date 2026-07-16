@@ -1,0 +1,7 @@
+dif,R,RMSE,KGE,name,,,,,
+-14.7142857,0.809325472,8.977915435,0.038556252,Budburstmintomaxdoublelogistic_SoS_threshold_NDGI5,1,4,4,1,9
+-18.7142857,0.81121736,7.655166899,0.025892459,Budburstmintomaxdoublelogistic_SoS_threshold_NDGI6,2,2,2,2,6
+-24.7142857,0.805348123,8.357702471,0.007098378,Budburstmintomaxdoublelogistic_SoS_threshold_NDGI8,4,6,3,3,12
+-21.7142857,0.813958216,7.617528876,-0.006375198,Budburstmintomaxdoublelogistic_SoS_threshold_NDGI7,3,1,1,4,6
+-26.7142857,0.808883304,9.527103819,-0.035349529,Budburstmintomaxdoublelogistic_SoS_threshold_NDGI9,5,5,5,5,15
+,0.810650081,10.86845091,-1.392650044,,,3,6,6,15

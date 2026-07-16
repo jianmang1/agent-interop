@@ -1,0 +1,12 @@
+# Hermes 本地配置文件
+.env
+*.local
+
+# 临时追踪文件
+.processed_tracker.json
+
+# 操作系统生成
+Thumbs.db
+.DS_Store
+
+# 截图缓存（每次生成的截图都会 commit，不 gitignore，但保留清理）

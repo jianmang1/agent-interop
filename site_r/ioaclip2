@@ -1,0 +1,35 @@
+import rasterio
+import rasterio.features
+import geopandas as gpd
+from shapely.geometry import shape, mapping
+import fiona
+from affine import Affine
+
+# 打开栅格文件
+with rasterio.open('D:\\数据\\AI\\Global-AI_ET0_v3_annual\\output_cropped.tif') as src:
+    # 读取栅格数据
+    image = src.read(1)  # 假设是单波段图像
+    mask = image > 6500  # 创建掩膜，选择像元值大于6500的区域
+
+    # 获取仿射变换参数
+    transform = src.transform
+    inv_transform = ~transform  # 反向变换，用于坐标转换
+
+    # 生成多边形
+    results = (
+        {'properties': {'raster_val': v}, 'geometry': s}
+        for i, (s, v) in enumerate(rasterio.features.shapes(image, mask=mask, transform=transform))
+    )
+
+    # 将结果转换为GeoDataFrame
+    geoms = list(results)
+    gdf = gpd.GeoDataFrame.from_features(geoms)
+
+    # 设置CRS（坐标参考系统）
+    gdf.crs = src.crs
+
+    # 保存为shapefile
+    output_shapefile = 'D:\\数据\\AI\\Global-AI_ET0_v3_annual\\output_cropped_greater_than_6500.shp'
+    gdf.to_file(driver='ESRI Shapefile', filename=output_shapefile)
+
+print(f"Shapefile saved to {output_shapefile}")
