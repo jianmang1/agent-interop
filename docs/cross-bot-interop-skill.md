@@ -160,3 +160,32 @@ agent-interop/
 ```
 /skill github-queue-interop
 ```
+
+
+---
+
+## 经验教训：飞书连接掉线
+
+### 症状
+* 飞书 gateway 突然停止响应
+* 群消息无法发送或接收
+* 连接后突然断线无重连
+
+### 可能原因
+| 原因 | 说明 |
+|------|------|
+| 端口冲突 | dashboard 端口被占用(9120-9140)导致异常 |
+| 网络波动 | WebSocket 长连接因网络中断 |
+| 进程崩溃 | Runtime 意外退出，桌面未自动重启 |
+
+### 解决方案：feishu-watchdog.ps1
+仓库 scripts/ 目录下的守护脚本：
+1. 每15秒检查 Hermes 进程状态
+2. 通过 gateway_state.json 判断飞书连接
+3. 检测断连时自动重启网关
+4. 最多连续重启5次防死循环
+5. 重启冷却30秒
+
+### 推荐使用
+* 开机自启：放入 shell:startup 文件夹
+* 计划任务（更稳定）：系统启动时运行 powershell -NoProfile -File scripts/feishu-watchdog.ps1
