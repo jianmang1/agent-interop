@@ -1,172 +1,198 @@
-# feishu-watchdog.ps1 — 飞书连接看门狗
-# 确保 Gateway 始终运行，飞书 WebSocket 不掉线
-# 建议开机自启：放在启动文件夹或通过任务计划程序
+# feishu-watchdog.ps1 — 飞书连接看门狗（双端合并版）
+# 笔记本 + 工位电脑 经验整合
+# 功能：监控飞书连接状态，断开时自动重启
+# 用法：powershell -NoProfile -File feishu-watchdog.ps1
+# 推荐：放入开机自启或计划任务
 
 param(
-    [int]$CheckInterval = 30,          # 检查间隔（秒）
-    [string]$HermesHome = "",          # Hermes 数据目录，留空自动检测
-    [string]$RuntimePath = "",         # runtime 可执行文件路径，留空自动检测
-    [switch]$InstallStartup = $false,  # 安装为开机自启
-    [switch]$Uninstall = $false        # 移除开机自启
+    [int]$CheckInterval = 15,        # 检查间隔（秒）
+    [string]$LogPath = "",           # 日志路径
+    [int]$MaxRestartAttempts = 5,    # 最大连续重启次数
+    [int]$RestartCooldown = 30       # 重启冷却（秒）
 )
 
-# ─── 自动检测路径 ──────────────────────────────────────────────
-
+# ===== 配置区域 =====
+$HermesHome = $env:HERMES_HOME
 if (-not $HermesHome) {
-    $HermesHome = $env:HERMES_HOME
-    if (-not $HermesHome) { $HermesHome = "D:\Hermes Agent CN Desktop\data\hermes-home" }
-}
-
-if (-not $RuntimePath) {
     $possiblePaths = @(
-        "$PSScriptRoot\hermes-agent-cn-runtime-win32-x64.exe",
-        "D:\Hermes Agent CN Desktop\data\versions\0.18.2-cn.2\hermes-agent-cn-runtime-win32-x64.exe",
-        "D:\Hermes Agent CN Desktop\data\versions\0.18.2-cn.2\hermes-agent-cn-desktop.exe"
+        "D:\Hermes Agent CN Desktop\data\hermes-home",
+        "C:\Users\10531\.hermes",
+        "$env:USERPROFILE\.hermes"
     )
     foreach ($p in $possiblePaths) {
-        if (Test-Path $p) { $RuntimePath = $p; break }
+        if (Test-Path "$p\config.yaml") { $HermesHome = $p; break }
     }
 }
+if (-not $HermesHome) { Write-Host "❌ 找不到 HERMES_HOME"; exit 1 }
 
-$GatewayLog = Join-Path $HermesHome "logs\gateway.log"
-$ErrorLog = Join-Path $HermesHome "logs\errors.log"
-$AgentLog = Join-Path $HermesHome "logs\agent.log"
+$GatewayLog = "$HermesHome\logs\gateway.log"
+$AgentLog = "$HermesHome\logs\agent.log"
+$WatchdogLog = "$HermesHome\logs\watchdog.log"
 
-# ─── 安装/卸载开机自启 ─────────────────────────────────────
+# gateway_state.json 可能的位置
+$statePaths = @(
+    "$HermesHome\..\..\data\gateway-runtime\gateway_state.json",
+    "$HermesHome\gateway_state.json",
+    "$env:HERMES_APP_DIR\data\gateway-runtime\gateway_state.json"
+)
 
-if ($InstallStartup) {
-    $shortcutPath = Join-Path ([Environment]::GetFolderPath('Startup')) "HermesFeishuWatchdog.lnk"
-    $shell = New-Object -ComObject WScript.Shell
-    $shortcut = $shell.CreateShortcut($shortcutPath)
-    $shortcut.TargetPath = "powershell.exe"
-    $shortcut.Arguments = "-NoProfile -WindowStyle Hidden -File `"$PSCommandPath`""
-    $shortcut.Description = "Hermes 飞书连接守护"
-    $shortcut.Save()
-    Write-Output "✅ 已安装开机自启: $shortcutPath"
-    return
+if (-not $LogPath) { $LogPath = $WatchdogLog }
+
+# ===== 工具函数 =====
+function Write-Log {
+    param([string]$Msg)
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $line = "[$timestamp] $Msg"
+    Write-Host $line
+    try { Add-Content -Path $LogPath -Value $line -ErrorAction SilentlyContinue } catch {}
 }
 
-if ($Uninstall) {
-    $shortcutPath = Join-Path ([Environment]::GetFolderPath('Startup')) "HermesFeishuWatchdog.lnk"
-    if (Test-Path $shortcutPath) { Remove-Item $shortcutPath -Force; Write-Output "✅ 已移除开机自启" }
-    else { Write-Output "ℹ️ 未安装开机自启" }
-    return
+function Get-HermesProcesses {
+    $result = @{desktop=$null; runtime=@()}
+    $result.desktop = Get-Process -Name "hermes-agent-cn-desktop" -ErrorAction SilentlyContinue | Select-Object -First 1
+    $result.runtime = Get-Process -Name "hermes-agent-cn-runtime-win32-x64" -ErrorAction SilentlyContinue
+    return $result
 }
 
-# ─── 核心逻辑 ────────────────────────────────────────────────
-
-Write-Output "================================================"
-Write-Output " Hermes 飞书连接看门狗"
-Write-Output " 检查间隔: ${CheckInterval}s"
-Write-Output " Hermes Home: $HermesHome"
-Write-Output " Runtime: $RuntimePath"
-Write-Output " 日志: $GatewayLog"
-Write-Output "================================================"
-
-function Test-GatewayRunning {
-    # 方法1：检查进程
-    $processRunning = (Get-Process -Name "hermes-agent-cn-runtime-win32-x64" -ErrorAction SilentlyContinue).Count -gt 0
-    
-    # 方法2：检查 gateway 日志是否在持续更新
-    $logFresh = $false
-    if (Test-Path $GatewayLog) {
-        $lastWrite = (Get-Item $GatewayLog).LastWriteTime
-        $logFresh = ((Get-Date) - $lastWrite).TotalMinutes -lt 10
-    }
-    
-    # 方法3：检查 Feishu 端口（WebSocket 不需要固定端口，但 gateway 启动后有健康检查）
-    $feishuConnected = $false
-    if (Test-Path $GatewayLog) {
-        $recentLog = Get-Content $GatewayLog -Tail 20 -ErrorAction SilentlyContinue
-        $feishuConnected = ($recentLog -match "connected to wss://msg-frontier.feishu.cn").Count -gt 0
-        # 如果日志太旧，连接可能已经断了
-        if ($logFresh -and -not $feishuConnected) {
-            # 检查是否有历史连接记录
-            $everConnected = (Get-Content $GatewayLog -ErrorAction SilentlyContinue | Select-String "connected to wss://msg-frontier.feishu.cn").Count -gt 0
-            if ($everConnected) {
-                # 曾经连上过但日志太久没更新，可能进程还活着但连接断了
-                $feishuConnected = $logFresh  # 如果日志更新说明进程在运行
-            }
+function Test-FeishuConnected {
+    # 方法1：检查 gateway_state.json
+    foreach ($sp in $statePaths) {
+        if (Test-Path $sp) {
+            try {
+                $state = Get-Content $sp -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json
+                if ($state.platforms.feishu.state -eq "connected") { return $true }
+            } catch {}
         }
     }
-
-    # 方法4：检查 agent.log 是否有最近的 Feishu 消息处理记录
-    $recentFeishuActivity = $false
-    if (Test-Path $AgentLog) {
-        $recentAgent = Get-Content $AgentLog -Tail 30 -ErrorAction SilentlyContinue
-        $recentFeishuActivity = ($recentAgent -match "feishu.*Received").Count -gt 0
+    # 方法2：检查 gateway 日志是否有最近连接记录
+    if (Test-Path $GatewayLog) {
+        $lastLines = Get-Content $GatewayLog -Tail 20 -ErrorAction SilentlyContinue
+        # 查找最近的成功连接记录
+        $connected = $lastLines | Select-String -Pattern "connected to wss://msg-frontier.feishu.cn"
+        if ($connected) {
+            # 检查连接后是否有断开
+            $disconnected = $lastLines | Select-String -Pattern "disconnect|connection.*close|reconnect.*fail"
+            if (-not $disconnected) { return $true }
+            # 连接在断开的后面？说明已重连成功
+            $connTime = ($connected | Select-Object -Last 1).Line
+            $discTime = ($disconnected | Select-Object -Last 1).Line
+            if (-not $discTime) { return $true }
+        }
+        # 方法3：检查 agent.log 是否有最近的飞书消息活动
+        if (Test-Path $AgentLog) {
+            $recent = Get-Content $AgentLog -Tail 10 -ErrorAction SilentlyContinue
+            if ($recent -match "feishu.*Received|feishu.*Sending") { return $true }
+        }
     }
-
-    return @{
-        ProcessRunning = $processRunning
-        LogFresh = $logFresh
-        FeishuConnected = $feishuConnected
-        FeishuActivity = $recentFeishuActivity
-        AllOk = $processRunning -and ($feishuConnected -or $logFresh)
-    }
+    return $false
 }
 
 function Restart-Gateway {
-    Write-Output "[$(Get-Date -Format 'HH:mm:ss')] ⚠ 检测到飞书断连，正在恢复..."
+    Write-Log "⚠ 正在重启飞书网关..."
+    $procs = Get-HermesProcesses
     
-    # 先尝试优雅关闭旧进程
-    Get-Process -Name "hermes-agent-cn-runtime-win32-x64" -ErrorAction SilentlyContinue | ForEach-Object {
-        Write-Output "  停止旧进程 PID=$($_.Id)"
-        $_.CloseMainWindow()
-        Start-Sleep -Seconds 2
-        if (-not $_.HasExited) { $_.Kill() }
+    # 先杀 runtime 进程（gateway），这会触发桌面应用自动重启
+    foreach ($p in $procs.runtime) {
+        try {
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            Write-Log "  ✓ 已终止 runtime PID=$($p.Id)"
+        } catch {}
     }
     
     Start-Sleep -Seconds 3
     
-    # 启动 Gateway
-    if (Test-Path $RuntimePath) {
-        Write-Output "  启动 Gateway: $RuntimePath"
-        Start-Process -FilePath $RuntimePath -ArgumentList "gateway","run" -WindowStyle Hidden
-        Start-Sleep -Seconds 10
-        
-        # 验证是否启动成功
-        $status = Test-GatewayRunning
-        if ($status.AllOk) {
-            Write-Output "  ✅ Gateway 启动成功"
-            # 记录恢复日志
-            $logEntry = "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] 看门狗自动恢复: Gateway 重启成功"
-            $logEntry | Out-File -FilePath (Join-Path $HermesHome "logs\watchdog.log") -Append
-        } else {
-            Write-Output "  ❌ Gateway 启动可能失败，状态: $($status | ConvertTo-Json -Compress)"
+    # 如果桌面应用也不在了，启动它
+    $procs = Get-HermesProcesses
+    if (-not $procs.desktop) {
+        $desktopPaths = @(
+            "D:\Hermes Agent CN Desktop\data\versions\0.18.2-cn.2\hermes-agent-cn-desktop.exe",
+            "$env:LOCALAPPDATA\Programs\hermes-agent\hermes-agent-cn-desktop.exe",
+            "C:\Program Files\hermes-agent\hermes-agent-cn-desktop.exe"
+        )
+        foreach ($dp in $desktopPaths) {
+            if (Test-Path $dp) {
+                try {
+                    Start-Process -FilePath $dp -WindowStyle Normal
+                    Write-Log "  🚀 已启动桌面应用: $dp"
+                    break
+                } catch {}
+            }
         }
     } else {
-        Write-Output "  ❌ 找不到 Runtime: $RuntimePath"
+        # 桌面应用在运行但 gateway 不在，直接启动 gateway
+        $runtimePaths = @(
+            "D:\Hermes Agent CN Desktop\data\versions\0.18.2-cn.2\hermes-agent-cn-runtime-win32-x64.exe",
+            "$PSScriptRoot\hermes-agent-cn-runtime-win32-x64.exe"
+        )
+        foreach ($rp in $runtimePaths) {
+            if (Test-Path $rp) {
+                try {
+                    Start-Process -FilePath $rp -ArgumentList "gateway","run" -WindowStyle Hidden
+                    Write-Log "  🚀 已启动 Gateway: $rp"
+                    break
+                } catch {}
+            }
+        }
+    }
+    
+    Start-Sleep -Seconds 5
+    
+    # 最终检查
+    $procs = Get-HermesProcesses
+    if ($procs.desktop -or $procs.runtime) {
+        Write-Log "  ✅ 网关已重启"
+        return $true
+    } else {
+        Write-Log "  ❌ 网关启动失败"
+        return $false
     }
 }
 
-# ─── 主循环 ──────────────────────────────────────────────────
+# ===== 主循环 =====
+Write-Log "============================================"
+Write-Log " Hermes 飞书网关守护脚本（双端合并版）"
+Write-Log " HERMES_HOME: $HermesHome"
+Write-Log " 检查间隔: ${CheckInterval}s | 最大重启: ${MaxRestartAttempts}次"
+Write-Log "============================================"
 
 $restartCount = 0
-$lastRestartTime = Get-Date
+$lastRestartTime = 0
 
 while ($true) {
-    $status = Test-GatewayRunning
+    $now = Get-Date
+    $proc = Get-HermesProcesses
+    $feishuOk = Test-FeishuConnected
     
-    # 记录当前状态（每小时一次）
-    if (((Get-Date).Minute -eq 0 -and (Get-Date).Second -lt 30)) {
-        $logEntry = "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] 状态: 进程=$($status.ProcessRunning) 日志=$($status.LogFresh) 飞书=$($status.FeishuConnected) 活动=$($status.FeishuActivity)"
-        $logEntry | Out-File -FilePath (Join-Path $HermesHome "logs\watchdog.log") -Append
-    }
+    $hasDesktop = [bool]$proc.desktop
+    $hasRuntime = $proc.runtime.Count -gt 0
     
-    if (-not $status.AllOk) {
-        $now = Get-Date
-        # 防止频繁重启（至少间隔 5 分钟）
-        if (($now - $lastRestartTime).TotalMinutes -ge 5) {
-            $restartCount++
-            Restart-Gateway
-            $lastRestartTime = $now
-            
-            if ($restartCount -ge 5) {
-                Write-Output "[$(Get-Date -Format 'HH:mm:ss')] ❌ 已尝试重启 $restartCount 次，请人工检查"
-            }
+    if (-not $hasDesktop -and -not $hasRuntime) {
+        Write-Log "⛔ Hermes 进程全部消失，准备重启"
+        if ($restartCount -lt $MaxRestartAttempts) {
+            $ok = Restart-Gateway
+            if ($ok) { $restartCount = 0 } else { $restartCount++ }
+            $lastRestartTime = (Get-Date).UnixTimeSeconds
         } else {
-            Write-Output "[$(Get-Date -Format 'HH:mm:ss')] ⚠ 上次重启不足5分钟，跳过"
+            Write-Log "❌ 连续重启 $MaxRestartAttempts 次失败，退出守护"
+            exit 1
+        }
+    } elseif ($hasRuntime -and -not $feishuOk) {
+        $timeSinceRestart = $now.UnixTimeSeconds - $lastRestartTime
+        if ($timeSinceRestart -gt $RestartCooldown) {
+            Write-Log "⛔ 飞书连接异常（有进程但未连接），准备重启网关"
+            if ($restartCount -lt $MaxRestartAttempts) {
+                $ok = Restart-Gateway
+                if ($ok) { $restartCount = 0 } else { $restartCount++ }
+                $lastRestartTime = (Get-Date).UnixTimeSeconds
+            } else {
+                Write-Log "❌ 连续重启 $MaxRestartAttempts 次失败，退出守护"
+                exit 1
+            }
+        }
+    } elseif ($hasRuntime -and $feishuOk) {
+        if ($restartCount -ne 0) {
+            $restartCount = 0
+            Write-Log "✅ 连接已恢复，重启计数归零"
         }
     }
     
